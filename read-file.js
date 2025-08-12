@@ -1,130 +1,169 @@
+// file: listJsKeyValueCount.js
+
 /**
- * Node.js script to:
- * 1. Recursively scan directories starting from the current location.
- * 2. Identify `.js` files.
- * 3. Count `key: value` pairs in each file (simple object properties).
- * 4. Save results into a text file, including:
- *    - Each file's key-value pair count.
- *    - Summary totals.
- * 
- * Uses only built-in Node.js modules: fs (filesystem) and path.
+ * This script scans through all JavaScript files inside a given directory (`startDir`)
+ * and its subdirectories. For each JS file:
+ *   1. It finds all simple `key: value` pairs.
+ *   2. It calculates the number of words in the `value` part only.
+ *   3. It logs the key-value pair and the value's word count.
+ *   4. It outputs results to a file, including a summary of totals.
  */
 
-const fs = require('fs');     // File system module for reading/writing files and directories
-const path = require('path'); // Path module for handling file paths
+// ------------------------------
+// Load built-in Node.js modules
+// ------------------------------
+const fs = require('fs');        // Provides file system operations like reading/writing files
+const path = require('path');    // Provides utilities for working with file and directory paths
 
-// Name of the output file where results will be saved
-const outputFile = 'js_key_value_count.txt';
-
-// Starting directory for scanning (current directory where the script is run)
-const startDir = __dirname;
+// ------------------------------
+// Configuration variables
+// ------------------------------
+const outputFile = 'js_value_word_count.txt'; // File where results will be saved
+const startDir = 'src'; // Directory where the script starts scanning
 
 /**
- * Recursively gets all files in a given directory.
- * 
- * @param {string} dirPath - Path to the directory to scan.
- * @param {string[]} fileList - Accumulator array for storing file paths.
- * @returns {string[]} - Array of file paths found in the directory and subdirectories.
+ * Recursively retrieves all file paths from a given directory and its subdirectories.
+ *
+ * @param {string} dirPath - The directory path to scan.
+ * @param {string[]} fileList - Accumulates found file paths during recursion.
+ * @returns {string[]} - List of full file paths.
  */
 function getAllFiles(dirPath, fileList = []) {
-    // Read all files and directories in the given directory
+    // Read all entries (files and directories) inside the current directory
     const files = fs.readdirSync(dirPath);
 
+    // Loop through each entry found
     files.forEach(file => {
-        // Full path of the current file or folder
+        // Join directory path with file/directory name to get full path
         const filePath = path.join(dirPath, file);
 
-        // Get stats for the current path (is it a file or folder?)
+        // Get information about the file (is it a directory or a regular file?)
         const stat = fs.statSync(filePath);
 
         if (stat.isDirectory()) {
-            // If it's a folder, recursively scan it
+            // If it's a directory, recurse into it
             getAllFiles(filePath, fileList);
         } else {
-            // If it's a file, add to the list
+            // If it's a file, add it to the list
             fileList.push(filePath);
         }
     });
 
-    return fileList;
+    return fileList; // Return the accumulated list of files
 }
 
 /**
- * Counts key-value pairs in a given JavaScript file.
- * This is a basic pattern match using regex (not 100% accurate for complex JS).
- * 
- * @param {string} filePath - Path to the JavaScript file.
- * @returns {number} - Count of key-value pairs found.
+ * Counts the number of words in a given string.
+ *
+ * @param {string} str - Input string to count words from.
+ * @returns {number} - Word count.
  */
-function countKeyValuePairsInJsFile(filePath) {
+function wordCount(str) {
+    if (!str) return 0; // If string is empty/null, return 0
+    // Trim whitespace, split by spaces/tabs/newlines, filter out empty entries
+    return str.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Reads a JavaScript file, finds all simple `key: value` pairs,
+ * and counts the number of words in each value.
+ *
+ * @param {string} filePath - Path to the JS file to process.
+ * @returns {{valueWords: number, pairs: string[]}} - Total value word count and formatted key-value strings.
+ */
+function getValueWordCountFromJsFile(filePath) {
     try {
-        // Read file content as a string
+        // Read file contents as UTF-8 text
         const content = fs.readFileSync(filePath, 'utf-8');
 
         /**
-         * Regex explanation:
-         * \b\w+\b     => Matches a "word" (key name) with word boundaries.
-         * \s*:\s*     => Matches a colon `:` surrounded by optional spaces.
-         * [^,{}\n]+   => Matches the value part until it hits a comma, curly brace, or newline.
+         * Match key-value pairs using regex:
+         * - \b\w+\b      → a word boundary + word (the key)
+         * - \s*:\s*      → optional spaces, a colon, optional spaces
+         * - [^,{}\n]+    → value: one or more characters until a comma, {, }, or newline
          */
         const matches = content.match(/\b\w+\b\s*:\s*[^,{}\n]+/g);
 
-        // If matches found, return count, otherwise 0
-        return matches ? matches.length : 0;
+        // If no matches found, return zero count
+        if (!matches) return { valueWords: 0, pairs: [] };
+
+        let totalValueWords = 0; // Accumulate word counts from all values
+        const pairs = matches.map(pair => {
+            // Split into key and value parts — value may contain colons, so use rest.join(':')
+            const [key, ...rest] = pair.split(':');
+            const value = rest.join(':').trim();
+
+            // Count words in the value
+            const count = wordCount(value);
+            totalValueWords += count;
+
+            // Return the key-value pair with value word count annotation
+            return `${key.trim()}: ${value} (valueWords: ${count})`;
+        });
+
+        return { valueWords: totalValueWords, pairs };
     } catch (err) {
-        // If file cannot be read, show error and return 0
+        // Log error if file can't be read
         console.error(`❌ Error reading ${filePath}:`, err);
-        return 0;
+        return { valueWords: 0, pairs: [] };
     }
 }
 
-// Main execution block wrapped in try-catch to handle unexpected errors
+// ------------------------------
+// Main script execution
+// ------------------------------
 try {
-    // Step 1: Get all files starting from the given directory
+    // Step 1: Get all files under startDir
     const allFiles = getAllFiles(startDir);
 
-    // Step 2: Filter only `.js` files
+    // Step 2: Filter only JavaScript files
     const jsFiles = allFiles.filter(f => f.endsWith('.js'));
 
-    // Step 3: Prepare variables to store results and totals
-    let results = [];           // Array to hold output lines
-    let totalFilesWithPairs = 0; // Number of JS files that have at least one key-value pair
-    let totalKeyValuePairs = 0;  // Total count of key-value pairs across all files
+    // Variables to store results
+    let fileResults = [];           // Stores results for each JS file
+    let totalFilesWithValues = 0;   // Count of JS files containing key-value pairs
+    let grandTotalValueWords = 0;   // Total value words across all files
 
-    // Step 4: Loop through each JS file and process it
+    // Step 3: Process each JS file
     jsFiles.forEach(jsFile => {
-        // Count key-value pairs in the file
-        const count = countKeyValuePairsInJsFile(jsFile);
+        const { valueWords, pairs } = getValueWordCountFromJsFile(jsFile);
 
-        // If file has at least one key-value pair, update totals
-        if (count > 0) {
-            totalFilesWithPairs++;
-            totalKeyValuePairs += count;
+        // Update counters if file has any values
+        if (valueWords > 0) {
+            totalFilesWithValues++;
+            grandTotalValueWords += valueWords;
         }
 
-        // Add this file's result to the results list
-        results.push(`${jsFile} => ${count} key-value pairs`);
+        // Store file-specific result
+        fileResults.push({ file: jsFile, valueWords, pairs });
     });
 
-    // Step 5: Sort results so that files with most key-value pairs appear first
-    results.sort((a, b) => {
-        // Extract numbers from " => X key-value pairs"
-        const countA = parseInt(a.match(/=> (\d+)/)[1], 10);
-        const countB = parseInt(b.match(/=> (\d+)/)[1], 10);
-        return countB - countA; // Descending order
+    // Step 4: Sort results by highest value word count first
+    fileResults.sort((a, b) => b.valueWords - a.valueWords);
+
+    // Step 5: Build output lines for the file
+    let outputLines = [];
+    fileResults.forEach(({ file, valueWords, pairs }) => {
+        // Header line for the file
+        outputLines.push(`${file} => ${valueWords} total value words`);
+
+        // Each key-value pair in the file
+        pairs.forEach(pair => {
+            outputLines.push(`    ${pair}`);
+        });
     });
 
-    // Step 6: Append summary to the results
-    results.push('\n--- Summary ---');
-    results.push(`Total JS files with key-value pairs: ${totalFilesWithPairs}`);
-    results.push(`Total key-value pairs: ${totalKeyValuePairs}`);
+    // Step 6: Add summary section at the bottom
+    outputLines.push('\n--- Summary ---');
+    outputLines.push(`Total JS files with values: ${totalFilesWithValues}`);
+    outputLines.push(`Grand total value words: ${grandTotalValueWords}`);
 
-    // Step 7: Write results to the output file
-    fs.writeFileSync(outputFile, results.join('\n'), 'utf-8');
+    // Step 7: Save results to output file
+    fs.writeFileSync(outputFile, outputLines.join('\n'), 'utf-8');
 
-    // Step 8: Inform the user
-    console.log(`✅ Key-value pair count saved to ${outputFile}`);
+    // Step 8: Inform user in console
+    console.log(`✅ Value word count saved to ${outputFile}`);
 } catch (err) {
-    // Handle unexpected errors
+    // Catch unexpected runtime errors
     console.error('❌ Error:', err);
 }
